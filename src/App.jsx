@@ -2,19 +2,36 @@ import { useState, useEffect, useCallback, memo, useRef } from 'react';
 import { nanoid } from 'nanoid';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Draggable from 'react-draggable';
+import { Resizable } from 'react-resizable';
 import { getAllNotes, addNote, updateNote, deleteNote, importNotes, clearAllNotes } from './db';
 import './App.css';
+import 'react-resizable/css/styles.css';
 
 const NoteModal = memo(({ 
   isAdd, 
   onClose, 
   onSave, 
   initialTitle = '', 
-  initialContent = '' 
+  initialContent = '',
+  initialShowPreview = true
 }) => {
   const [title, setTitle] = useState(initialTitle);
   const [content, setContent] = useState(initialContent);
-  const [showPreview, setShowPreview] = useState(true);
+  const [showPreview, setShowPreview] = useState(initialShowPreview);
+
+  useEffect(() => {
+    const savedPreviewState = localStorage.getItem('notePreviewState');
+    if (savedPreviewState !== null) {
+      setShowPreview(JSON.parse(savedPreviewState));
+    }
+  }, []);
+
+  const handlePreviewToggle = useCallback(() => {
+    const newState = !showPreview;
+    setShowPreview(newState);
+    localStorage.setItem('notePreviewState', JSON.stringify(newState));
+  }, [showPreview]);
 
   const handleSave = useCallback(() => {
     if (!content.trim()) return;
@@ -29,7 +46,7 @@ const NoteModal = memo(({
           <div className="modal-actions">
             <button
               className={`preview-toggle ${showPreview ? 'active' : ''}`}
-              onClick={() => setShowPreview(!showPreview)}
+              onClick={handlePreviewToggle}
               aria-label={showPreview ? 'Hide preview' : 'Show preview'}
             >
               👁️
@@ -93,17 +110,22 @@ const NoteModal = memo(({
 
 NoteModal.displayName = 'NoteModal';
 
-const Note = memo(({ note, onTogglePin, onEdit, onDelete }) => {
+const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, isOrganized }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const colorIndex = (note.id.charCodeAt(0) + note.id.charCodeAt(1)) % 5;
 
-  return (
+  const handleResize = (e, { size }) => {
+    onResize(note.id, size);
+  };
+
+  const noteContent = (
     <div
       className={`note color-${colorIndex} ${note.pinned ? 'pinned' : ''}`}
       style={{
-        width: note.width + 'px',
-        height: note.height + 'px',
+        width: isOrganized ? '100%' : (note.width + 'px'),
+        height: isOrganized ? 'auto' : (note.height + 'px'),
+        minHeight: '200px'
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -162,6 +184,32 @@ const Note = memo(({ note, onTogglePin, onEdit, onDelete }) => {
       )}
     </div>
   );
+
+  if (isOrganized) {
+    return noteContent;
+  }
+
+  return (
+    <Draggable
+      handle=".note-header"
+      defaultPosition={note.position || { x: 0, y: 0 }}
+      grid={[10, 10]}
+      onStop={(e, data) => onDragStop(note.id, { x: data.x, y: data.y })}
+    >
+      <div style={{ position: 'absolute' }}>
+        <Resizable
+          width={note.width || 300}
+          height={note.height || 200}
+          minConstraints={[200, 150]}
+          maxConstraints={[800, 600]}
+          onResize={handleResize}
+          resizeHandles={['se']}
+        >
+          {noteContent}
+        </Resizable>
+      </div>
+    </Draggable>
+  );
 });
 
 Note.displayName = 'Note';
@@ -171,7 +219,21 @@ function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
+  const [isOrganized, setIsOrganized] = useState(false);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const savedViewMode = localStorage.getItem('viewMode');
+    if (savedViewMode !== null) {
+      setIsOrganized(JSON.parse(savedViewMode));
+    }
+  }, []);
+
+  const toggleViewMode = useCallback(() => {
+    const newMode = !isOrganized;
+    setIsOrganized(newMode);
+    localStorage.setItem('viewMode', JSON.stringify(newMode));
+  }, [isOrganized]);
 
   const loadNotes = useCallback(async () => {
     const loadedNotes = await getAllNotes();
@@ -187,35 +249,15 @@ function App() {
     loadNotes();
   }, [loadNotes]);
 
-  function calculateNoteSize(content) {
-    const length = content.length;
-    let width, height;
-    
-    if (length < 100) {
-      width = 300;
-      height = 200;
-    } else if (length < 300) {
-      width = 350;
-      height = 250;
-    } else {
-      width = 400;
-      height = 300;
-    }
-
-    width += Math.floor(Math.random() * 50);
-    height += Math.floor(Math.random() * 50);
-
-    return { width, height };
-  }
-
   const handleAddNote = useCallback(async (title, content) => {
-    const size = calculateNoteSize(content);
     const newNote = {
       id: nanoid(),
       title: title || 'Untitled',
       content,
       pinned: false,
-      ...size
+      width: 300,
+      height: 200,
+      position: { x: 0, y: 0 }
     };
 
     await addNote(newNote);
@@ -226,12 +268,10 @@ function App() {
   const handleSaveEdit = useCallback(async (title, content) => {
     if (!editingNote) return;
 
-    const size = calculateNoteSize(content);
     const updatedNote = {
       ...editingNote,
       title,
-      content,
-      ...size
+      content
     };
 
     await updateNote(updatedNote);
@@ -249,6 +289,33 @@ function App() {
     await deleteNote(id);
     loadNotes();
   }, [loadNotes]);
+
+  const handleResize = useCallback(async (id, size) => {
+    const note = notes.find(n => n.id === id);
+    if (!note) return;
+
+    const updatedNote = {
+      ...note,
+      width: size.width,
+      height: size.height
+    };
+
+    await updateNote(updatedNote);
+    loadNotes();
+  }, [notes, loadNotes]);
+
+  const handleDragStop = useCallback(async (id, position) => {
+    const note = notes.find(n => n.id === id);
+    if (!note) return;
+
+    const updatedNote = {
+      ...note,
+      position
+    };
+
+    await updateNote(updatedNote);
+    loadNotes();
+  }, [notes, loadNotes]);
 
   const handleExport = useCallback(async () => {
     const allNotes = await getAllNotes();
@@ -287,6 +354,9 @@ function App() {
     }
   }, [loadNotes]);
 
+  const savedPreviewState = localStorage.getItem('notePreviewState');
+  const initialShowPreview = savedPreviewState !== null ? JSON.parse(savedPreviewState) : true;
+
   const pinnedNotes = notes.filter(note => note.pinned);
   const unpinnedNotes = notes.filter(note => !note.pinned);
 
@@ -300,6 +370,21 @@ function App() {
         >
           +
         </button>
+
+        <div className="view-toggle">
+          <button
+            className={!isOrganized ? 'active' : ''}
+            onClick={() => !isOrganized || toggleViewMode()}
+          >
+            Free
+          </button>
+          <button
+            className={isOrganized ? 'active' : ''}
+            onClick={() => isOrganized || toggleViewMode()}
+          >
+            Organized
+          </button>
+        </div>
 
         <div className="options-container">
           <button
@@ -329,38 +414,60 @@ function App() {
         </div>
       </div>
 
-      <div className="notes-sections">
-        {pinnedNotes.length > 0 && (
-          <div className="notes-section">
-            <h2 className="section-title">📌 Pinned Notes</h2>
-            <div className="notes-container">
-              {pinnedNotes.map((note) => (
-                <Note
-                  key={note.id}
-                  note={note}
-                  onTogglePin={handleTogglePin}
-                  onEdit={setEditingNote}
-                  onDelete={handleDeleteNote}
-                />
-              ))}
+      <div className={`notes-container ${isOrganized ? 'organized' : ''}`}>
+        {isOrganized ? (
+          <>
+            {pinnedNotes.length > 0 && (
+              <div className="notes-section">
+                <h2 className="section-title">📌 Pinned Notes</h2>
+                <div className="notes-grid">
+                  {pinnedNotes.map((note) => (
+                    <Note
+                      key={note.id}
+                      note={note}
+                      onTogglePin={handleTogglePin}
+                      onEdit={setEditingNote}
+                      onDelete={handleDeleteNote}
+                      onResize={handleResize}
+                      onDragStop={handleDragStop}
+                      isOrganized={true}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="notes-section">
+              {pinnedNotes.length > 0 && <h2 className="section-title">Other Notes</h2>}
+              <div className="notes-grid">
+                {unpinnedNotes.map((note) => (
+                  <Note
+                    key={note.id}
+                    note={note}
+                    onTogglePin={handleTogglePin}
+                    onEdit={setEditingNote}
+                    onDelete={handleDeleteNote}
+                    onResize={handleResize}
+                    onDragStop={handleDragStop}
+                    isOrganized={true}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          </>
+        ) : (
+          notes.map((note) => (
+            <Note
+              key={note.id}
+              note={note}
+              onTogglePin={handleTogglePin}
+              onEdit={setEditingNote}
+              onDelete={handleDeleteNote}
+              onResize={handleResize}
+              onDragStop={handleDragStop}
+              isOrganized={false}
+            />
+          ))
         )}
-
-        <div className="notes-section">
-          {pinnedNotes.length > 0 && <h2 className="section-title">Other Notes</h2>}
-          <div className="notes-container">
-            {unpinnedNotes.map((note) => (
-              <Note
-                key={note.id}
-                note={note}
-                onTogglePin={handleTogglePin}
-                onEdit={setEditingNote}
-                onDelete={handleDeleteNote}
-              />
-            ))}
-          </div>
-        </div>
       </div>
 
       {showAddModal && (
@@ -368,6 +475,7 @@ function App() {
           isAdd={true}
           onClose={() => setShowAddModal(false)}
           onSave={handleAddNote}
+          initialShowPreview={initialShowPreview}
         />
       )}
       {editingNote && (
@@ -377,6 +485,7 @@ function App() {
           onSave={handleSaveEdit}
           initialTitle={editingNote.title}
           initialContent={editingNote.content}
+          initialShowPreview={initialShowPreview}
         />
       )}
     </div>
