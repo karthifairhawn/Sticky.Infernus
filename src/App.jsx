@@ -110,10 +110,69 @@ const NoteModal = memo(({
 
 NoteModal.displayName = 'NoteModal';
 
+const CodeBlock = memo(({ children }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(children);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <pre>
+      <button className="copy-code-button" onClick={handleCopy}>
+        {copied ? 'Copied!' : 'Copy'}
+      </button>
+      <code>{children}</code>
+    </pre>
+  );
+});
+
+CodeBlock.displayName = 'CodeBlock';
+
+const ContextMenu = memo(({ x, y, onEdit, onDelete, onClose }) => {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="context-menu"
+      style={{ left: x, top: y }}
+    >
+      <div className="context-menu-item" onClick={onEdit}>
+        ✏️ Edit
+      </div>
+      <div className="context-menu-item" onClick={onDelete}>
+        🗑️ Delete
+      </div>
+    </div>
+  );
+});
+
+ContextMenu.displayName = 'ContextMenu';
+
 const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, isOrganized }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null);
   const colorIndex = (note.id.charCodeAt(0) + note.id.charCodeAt(1)) % 5;
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  };
 
   const handleResize = (e, { size }) => {
     onResize(note.id, size);
@@ -129,17 +188,20 @@ const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, 
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onContextMenu={handleContextMenu}
     >
       <div className={`note-header ${isHovered ? 'show-actions' : ''}`}>
         <div className="note-title">{note.title}</div>
         <div className="note-actions">
-          <button
-            className={`pin-button ${note.pinned ? 'pinned' : ''}`}
-            onClick={() => onTogglePin(note)}
-            aria-label={note.pinned ? 'Unpin note' : 'Pin note'}
-          >
-            📌
-          </button>
+          {isOrganized && (
+            <button
+              className={`pin-button ${note.pinned ? 'pinned' : ''}`}
+              onClick={() => onTogglePin(note)}
+              aria-label={note.pinned ? 'Unpin note' : 'Pin note'}
+            >
+              📌
+            </button>
+          )}
           <button
             className="action-button edit-button"
             onClick={() => onEdit(note)}
@@ -158,10 +220,34 @@ const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, 
       </div>
 
       <div className="note-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            code: ({ node, inline, children }) => {
+              if (inline) return <code>{children}</code>;
+              return <CodeBlock>{children}</CodeBlock>;
+            }
+          }}
+        >
           {note.content}
         </ReactMarkdown>
       </div>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onEdit={() => {
+            setContextMenu(null);
+            onEdit(note);
+          }}
+          onDelete={() => {
+            setContextMenu(null);
+            setShowDeleteConfirm(true);
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {showDeleteConfirm && (
         <div className="delete-confirm">
@@ -371,21 +457,6 @@ function App() {
           +
         </button>
 
-        <div className="view-toggle">
-          <button
-            className={!isOrganized ? 'active' : ''}
-            onClick={() => !isOrganized || toggleViewMode()}
-          >
-            Free
-          </button>
-          <button
-            className={isOrganized ? 'active' : ''}
-            onClick={() => isOrganized || toggleViewMode()}
-          >
-            Organized
-          </button>
-        </div>
-
         <div className="options-container">
           <button
             className="options-button"
@@ -396,6 +467,20 @@ function App() {
           </button>
           {showOptions && (
             <div className="options-menu">
+              <div className="view-options">
+                <button
+                  className={!isOrganized ? 'active' : ''}
+                  onClick={() => !isOrganized || toggleViewMode()}
+                >
+                  Free Mode
+                </button>
+                <button
+                  className={isOrganized ? 'active' : ''}
+                  onClick={() => isOrganized || toggleViewMode()}
+                >
+                  Organized Mode
+                </button>
+              </div>
               <button onClick={handleExport}>
                 Export Notes
               </button>
