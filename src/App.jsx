@@ -171,7 +171,15 @@ const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, 
 
   const handleContextMenu = (e) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
+  
+    // Get the bounding rectangle of the draggable container
+    const containerRect = e.currentTarget.getBoundingClientRect();
+  
+    // Calculate the position relative to the container
+    const x = e.clientX - containerRect.left;
+    const y = e.clientY - containerRect.top;
+  
+    setContextMenu({ x, y });
   };
 
   const handleResize = (e, { size }) => {
@@ -207,7 +215,7 @@ const Note = memo(({ note, onTogglePin, onEdit, onDelete, onResize, onDragStop, 
             onClick={() => onEdit(note)}
             aria-label="Open note"
           >
-            👁️
+            Edit
           </button>
           <button
             className="action-button delete-button"
