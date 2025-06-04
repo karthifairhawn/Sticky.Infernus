@@ -215,8 +215,11 @@
 .note-content pre {
   position: relative;
   background: var(--gray-100);
-  padding: 1em;
   border-radius: 6px;
+}
+
+code{
+  /* padding px; */
 }
 
 .copy-code-button {
@@ -232,6 +235,17 @@
   cursor: pointer;
   opacity: 0;
   transition: all 0.2s ease;
+}
+
+.code-container {
+  max-height: 200px; /* Set the maximum height */
+  max-width: 100%; /* Ensure it doesn't exceed the container width */
+  overflow: auto; /* Enable scrolling for overflow content */
+  border: 0px solid #ccc; /* Optional: Add a border for better visibility */
+  border-radius: 5px; /* Optional: Add rounded corners */
+  background-color: #1e1e1e; /* Match the theme of the code block */
+  padding: 0px; /* Add padding for better readability */
+  font-size: 10px;
 }
 
 .note-content pre:hover .copy-code-button {
